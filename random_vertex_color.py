@@ -2,64 +2,114 @@
 
 # Author: safina3d
 # Website: safina3d.blogspot.com
-# Version: 1.1
-# Description: Assign random color to connected vertices using  Vertex Color Tag
+# Version: 1.2
+# Description: This script assigns random colors to connected vertices of a polygonal object
+# in Cinema 4D using the Vertex Color Tag. It identifies connected vertex chunks and colors
+# each chunk with a unique random color.
 
+
+import time
 import c4d
-from c4d import utils, Vector, BaseContainer
-from random import randint
+from c4d import utils, Vector, BaseObject, VariableTag
+from random import uniform
+from typing import List, Dict, Set
 
+def get_random_color() -> Vector:
+    """
+    Returns a random color as c4d.Vector.
+    
+    Returns:
+        c4d.Vector: A vector representing a random color.
+    """
+    return Vector(uniform(0.0, 1.0), uniform(0.0, 1.0), uniform(0.0, 1.0))
 
-def get_random_color():
-    """ Return a random color as c4d.Vector """
+def build_adjacency_list(op: BaseObject) -> Dict[int, Set[int]]:
+    """
+    Builds an adjacency list from the polygons of the object.
 
-    def get_random_value():
-        """ Return a random value between 0.0 and 1.0 """
-        return randint(0, 255) / 256.0
+    Args:
+        op (BaseObject): The polygonal object in Cinema 4D.
 
-    return Vector(get_random_value(), get_random_value(), get_random_value())
+    Returns:
+        Dict[int, Set[int]]: A dictionary where each key is a vertex and the value is a set of adjacent vertices.
+    """
+    adjacency_list = {}
+    for i in range(op.GetPolygonCount()):
+        poly = op.GetPolygon(i)
+        vertices = [poly.a, poly.b, poly.c, poly.d]
+        for vert in vertices:
+            if vert not in adjacency_list:
+                adjacency_list[vert] = set()
+            adjacency_list[vert].update([v for v in vertices if v != vert])
+    return adjacency_list
 
+def get_connected_chunk(adjacency_list: Dict[int, Set[int]], start_vertex: int, visited: Set[int]) -> Set[int]:
+    """
+    Retrieves a connected chunk of vertices starting from a start vertex.
 
-def get_connected_polygons(obj, remaining_polygons):
-    # type: (PolygonObject, List[int]) -> List[int]
-    bs = obj.GetPolygonS()
-    bs.DeselectAll()
-    bs.Select(remaining_polygons[0])
-    utils.SendModelingCommand(command=c4d.MCOMMAND_SELECTCONNECTED,
-                              list=[obj],
-                              mode=c4d.MODELINGCOMMANDMODE_POLYGONSELECTION,
-                              bc=BaseContainer(),
-                              doc=doc)
-    result = []
-    for polygon_index in remaining_polygons:
-        if bs.IsSelected(polygon_index):
-            result.append(polygon_index)
+    Args:
+        adjacency_list (Dict[int, Set[int]]): The adjacency list of vertices.
+        start_vertex (int): The start vertex.
+        visited (Set[int]): The set of already visited vertices.
 
-    return result
+    Returns:
+        Set[int]: A set of vertices forming a connected chunk.
+    """
+    stack = [start_vertex]
+    chunk = set()
 
+    while stack:
+        vertex = stack.pop()
+        if vertex not in visited:
+            visited.add(vertex)
+            chunk.add(vertex)
+            stack.extend(adjacency_list[vertex] - visited)
 
-def polygons_to_vertices(op, polygon_list):
-    # type: (BaseObject, List[int]) -> List[int]
-    vertices = []
+    return chunk
+
+def get_chunks(op: BaseObject) -> List[List[int]]:
+    """
+    Splits the object into chunks of connected vertices.
+
+    Args:
+        op (BaseObject): The polygonal object in Cinema 4D.
+
+    Returns:
+        List[List[int]]: A list of chunks, each being a list of connected vertices.
+    """
+    adjacency_list = build_adjacency_list(op)
+    visited = set()
+    chunks = []
+
+    for vertex in adjacency_list:
+        if vertex not in visited:
+            chunk = get_connected_chunk(adjacency_list, vertex, visited)
+            chunks.append(list(chunk))
+
+    return chunks
+
+def polygons_to_vertices(op: BaseObject, polygon_list: List[int]) -> List[int]:
+    """
+    Converts a list of polygon indices to a list of vertex indices.
+
+    Args:
+        op (BaseObject): The polygonal object in Cinema 4D.
+        polygon_list (List[int]): The list of polygon indices.
+
+    Returns:
+        List[int]: A list of vertex indices.
+    """
+    vertices = set()
     for polygon_index in polygon_list:
         pts = op.GetPolygon(polygon_index)
-        vertices += [pts.a, pts.b, pts.c, pts.d]
+        vertices.update([pts.a, pts.b, pts.c, pts.d])
+    return list(vertices)
 
-    return list(set(vertices))
-
-
-def get_chunks(op, remaining_polygons):
-    # type: (BaseObject, List[int]) -> List[List[int]]
-    result = []
-    while len(remaining_polygons) > 0:
-        connected_polygons = get_connected_polygons(op, remaining_polygons)
-        result.append(polygons_to_vertices(op, connected_polygons))
-        remaining_polygons = list(set(remaining_polygons).difference(connected_polygons))
-
-    return result
-
-
-def main():
+def main() -> None:
+    """
+    Main function executed when the script is called.
+    Colors the connected vertices of the object with random colors.
+    """
     if op is None:
         return
 
@@ -74,9 +124,7 @@ def main():
     doc.SetActiveTag(vertex_color_tag)
     data = vertex_color_tag.GetDataAddressW()
 
-    remaining_polygons = list(range(op.GetPolygonCount()))
-
-    chunks = get_chunks(op, remaining_polygons)
+    chunks = get_chunks(op)
     for chunk in chunks:
         color = get_random_color()
         for vertex in chunk:
